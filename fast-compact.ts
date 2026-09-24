@@ -19,9 +19,9 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 // tokensBefore + reserveTokens <= contextWindow.
 
 const TOOL_NAME = "summarize_session";
-const SUMMARY_BUDGET = 4096; // soft token cap, written into the prompt
-const MAX_OUTPUT = 8192; // hard cap on the summarization stream
-const DEFAULT_RESERVE_TOKENS = 12288; // fallback when settings.json has no compaction.reserveTokens
+const SUMMARY_BUDGET = 8192; // soft token cap, written into the prompt
+const MAX_OUTPUT = 12288; // hard cap on the summarization stream
+const DEFAULT_RESERVE_TOKENS = 13312; // fallback when settings.json has no compaction.reserveTokens
 const TOOL_RESULT_MAX_CHARS = 2000; // per-tool-result truncation in slice serialization (matches pi's built-in)
 const WIDGET_KEY = "fast-compact";
 const PAINT_MS = 150;
