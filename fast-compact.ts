@@ -1,8 +1,6 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
@@ -14,30 +12,19 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 // - slice: no captured request (fresh restart) or the replay no longer fits in
 //   the context window: serialize the summarizable slice of the session and
 //   summarize it cold. Same shape as pi's built-in serializer.
-// The replay-vs-slice boundary is compaction.reserveTokens in settings.json
-// (the same margin pi uses to trigger auto-compaction): replay while
-// tokensBefore + reserveTokens <= contextWindow.
+// The replay-vs-slice boundary is the physical fit of the replay request:
+// captured prefix + instruction tail + MAX_OUTPUT must fit the context window.
+// Replay while that fits; the serialized slice is the cold fallback.
 
 const TOOL_NAME = "summarize_session";
 const SUMMARY_BUDGET = 8192; // soft token cap, written into the prompt
 const MAX_OUTPUT = 12288; // hard cap on the summarization stream
-const DEFAULT_RESERVE_TOKENS = 13312; // fallback when settings.json has no compaction.reserveTokens
+const REPLAY_TAIL_MARGIN = 512; // instruction user message + chat template overhead, in tokens
 const TOOL_RESULT_MAX_CHARS = 2000; // per-tool-result truncation in slice serialization (matches pi's built-in)
 const WIDGET_KEY = "fast-compact";
 const PAINT_MS = 150;
 const BAR_WIDTH = 24;
 const FINAL_HOLD_MS = 2500;
-
-function readReserveTokens(): number {
-  try {
-    const raw = fs.readFileSync(path.join(__dirname, "..", "settings.json"), "utf8");
-    const v = (JSON.parse(raw) as { compaction?: { reserveTokens?: unknown } }).compaction?.reserveTokens;
-    if (typeof v === "number" && Number.isFinite(v) && v > 0) return Math.floor(v);
-  } catch {
-    // no settings file or unparseable: use the default
-  }
-  return DEFAULT_RESERVE_TOKENS;
-}
 
 const SKELETON = `## Goal
 [one or two sentences: what the user is trying to accomplish]
@@ -234,9 +221,10 @@ export default function fastCompact(pi: ExtensionAPI) {
   pi.on("session_before_compact", async (event, ctx) => {
     const { preparation, customInstructions, signal } = event;
     if (!ctx.model) return; // no model to stream with; let the built-in try
-    const reserveTokens = readReserveTokens();
+    // The replay request sends the captured prefix, not the current context, so fit is tested on the prefix
+    const prefixTok = captured ? captured.reduce((n, m) => n + estimateTokens(m), 0) : 0;
     const canReplay =
-      !!captured && preparation.tokensBefore + reserveTokens <= ctx.model.contextWindow;
+      !!captured && prefixTok + REPLAY_TAIL_MARGIN + MAX_OUTPUT <= ctx.model.contextWindow;
     if (!canReplay && preparation.messagesToSummarize.length === 0 && preparation.turnPrefixMessages.length === 0)
       return; // nothing to summarize either way
 
@@ -342,7 +330,8 @@ export default function fastCompact(pi: ExtensionAPI) {
       return;
     }
     if (!summary) summary = salvageSummary(toolJson);
-    if (!summary) summary = textOut.trim() || undefined;
+    // a narrated fake tool call is not a checkpoint; only accept prose with the skeleton header
+    if (!summary && textOut.includes("## Goal")) summary = textOut.trim();
     if (!summary) {
       hide(ctx);
       if (ctx.hasUI) ctx.ui.notify("fast-compact: model returned no summary; falling back to built-in compaction", "warning");
