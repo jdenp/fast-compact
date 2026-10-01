@@ -67,7 +67,8 @@ function buildPrompt(sourceNote: string, customInstructions?: string): string {
     lines.push("", `Additional focus for this compaction: ${customInstructions}`);
   }
   lines.push("", "Do not call any other tool. Do not write text outside the tool call.");
-  return lines.join("\n");
+  // /no_think: replay sends enable_thinking=true to match the cached rendering; the marker stops the model thinking.
+  return lines.join("\n") + "\n/no_think";
 }
 
 function fmtTok(n: number): string {
@@ -282,12 +283,12 @@ export default function fastCompact(pi: ExtensionAPI) {
     let streamError: string | undefined;
 
     try {
-      // No reasoning option: the qwen provider then sends enable_thinking=false,
-      // which is the fastest valid mode and keeps the summary a plain tool call.
+      // Same thinking flag as the cached request, or the template restamps the prefix and the cache misses.
       const stream = ctx.modelRegistry.streamSimple(ctx.model, { messages }, {
         maxTokens: MAX_OUTPUT,
         signal,
         sessionId: ctx.sessionManager.getSessionId(),
+        reasoning: ctx.thinkingLevel,
       });
       for await (const ev of stream) {
         switch (ev.type) {
