@@ -233,8 +233,8 @@ export default function fastCompact(pi: ExtensionAPI) {
       if (ctx.hasUI) ctx.ui.setWidget(WIDGET_KEY, [line]);
     };
 
-    // Gauge: a checkpoint usually lands around 1/30 of the input it covers, so
-    // predict the summary length per run instead of measuring against the 4k cap.
+    // Gauge: percent of SUMMARY_BUDGET consumed; per-run length predictions are
+    // inaccurate, the budget is the number the prompt actually sets.
     // Qwen tokenizes ~2x denser than pi's chars/4 house estimate.
     const charsPerTok = /qwen/i.test(ctx.model.id) ? 2 : 4;
     let messages: { role: string; content: unknown; timestamp?: number }[];
@@ -253,7 +253,7 @@ export default function fastCompact(pi: ExtensionAPI) {
       const text = `${buildPrompt("The <conversation> block below is the session history to be summarized.", customInstructions)}\n\n<conversation>\n${conversation}\n</conversation>`;
       messages = [{ role: "user" as const, content: [{ type: "text" as const, text }], timestamp: Date.now() }];
     }
-    const expectedTok = Math.max(512, Math.min(SUMMARY_BUDGET, Math.round(scopeTok / 30)));
+    const expectedTok = SUMMARY_BUDGET;
 
     const startedAt = Date.now();
     let outChars = 0;
